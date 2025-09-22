@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Learning AI Chatbot (Persistent Memory)</title>
+    <title>Learning AI Chatbot (Shared Memory)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -40,9 +40,9 @@
         <div class="p-4 border-b bg-blue-600 text-white rounded-t-lg flex items-center justify-between">
             <div>
                 <h1 class="text-xl font-bold">Learning AI Chatbot</h1>
-                <p id="status-text" class="text-xs opacity-80">Memory is persistent, chat is not.</p>
+                <p id="status-text" class="text-xs opacity-80">Connecting to shared memory...</p>
             </div>
-             <div id="status-indicator" class="w-4 h-4 rounded-full bg-green-400" title="Ready"></div>
+             <div id="status-indicator" class="w-4 h-4 rounded-full bg-yellow-400" title="Connecting..."></div>
         </div>
 
         <!-- Chat Messages -->
@@ -51,7 +51,7 @@
                 <!-- Welcome message is here initially -->
                 <div class="flex justify-start mb-4">
                     <div class="chat-bubble-ai py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
-                        <p class="text-sm">Hello! I remember what you teach me, but our chat will reset if you refresh the page. Let's start a new conversation!</p>
+                        <p class="text-sm">Hello! I have a shared memory. What you teach me, others will see. Our personal chat will reset if you refresh the page.</p>
                     </div>
                 </div>
             </div>
@@ -61,93 +61,146 @@
         <div class="p-4 border-t bg-gray-50 rounded-b-lg">
             <form id="message-form" class="flex items-center space-x-4">
                 <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
-                <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200">
+                <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200" disabled>
                     Send
                 </button>
             </form>
         </div>
     </div>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            // DOM Elements
-            const chatContainer = document.getElementById('chat-container');
-            const messagesList = document.getElementById('messages-list');
-            const messageForm = document.getElementById('message-form');
-            const messageInput = document.getElementById('message-input');
+    <!-- Firebase SDK -->
+    <script type="module">
+        // Firebase Configuration
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "test", authDomain: "test.firebaseapp.com", projectId: "test" };
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-            // App state
-            let isWaitingForLesson = false;
-            let lastUserMessage = '';
-            
-            // --- "Memory" Data Retrieval from LocalStorage ---
-            const getLearnedResponses = () => {
-                const responses = localStorage.getItem('chatbotLearnedResponses');
-                return responses ? JSON.parse(responses) : {};
-            };
+        // Firebase Imports
+        import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-            // --- "Memory" Data Saving to LocalStorage ---
-            const saveLearnedResponses = (responses) => {
-                localStorage.setItem('chatbotLearnedResponses', JSON.stringify(responses));
-            };
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const auth = getAuth(app);
+        setLogLevel('Debug');
 
-            // --- UI Rendering ---
-            function appendMessage(sender, text) {
-                const bubbleClass = sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
-                const justification = sender === 'user' ? 'justify-end' : 'justify-start';
-                const messageElement = `
-                    <div class="flex ${justification} mb-4">
-                        <div class="${bubbleClass} py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
-                            <p class="text-sm">${text}</p>
-                        </div>
-                    </div>`;
-                messagesList.insertAdjacentHTML('beforeend', messageElement);
-                chatContainer.scrollTop = chatContainer.scrollHeight;
+        // DOM Elements
+        const chatContainer = document.getElementById('chat-container');
+        const messagesList = document.getElementById('messages-list');
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = messageForm.querySelector('button');
+        const statusText = document.getElementById('status-text');
+        const statusIndicator = document.getElementById('status-indicator');
+
+        // App state
+        let isWaitingForLesson = false;
+        let lastUserMessage = '';
+
+        // --- Authentication ---
+        onAuthStateChanged(auth, user => {
+            if (user) {
+                statusText.textContent = 'Connected to shared memory. Chat is not saved.';
+                statusIndicator.classList.remove('bg-yellow-400');
+                statusIndicator.classList.add('bg-green-400');
+                statusIndicator.title = 'Connected';
+                sendButton.disabled = false;
+            } else {
+                statusText.textContent = 'Disconnected. Please refresh.';
+                statusIndicator.classList.remove('bg-green-400', 'bg-yellow-400');
+                statusIndicator.classList.add('bg-red-400');
+                statusIndicator.title = 'Disconnected';
+                sendButton.disabled = true;
             }
-
-            // --- Core Logic ---
-            messageForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                const messageText = messageInput.value.trim();
-                if (!messageText) return;
-
-                messageInput.value = '';
-                // Add user message to the screen
-                appendMessage('user', messageText);
-
-                if (isWaitingForLesson) {
-                    teachAI(lastUserMessage, messageText);
+        });
+        
+        async function signIn() {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
-                    generateAIResponse(messageText);
+                    await signInAnonymously(auth);
                 }
-            });
-            
-            function generateAIResponse(userMessage) {
-                const normalizedUserMessage = userMessage.toLowerCase().trim();
-                const learnedResponses = getLearnedResponses();
-                
-                if (learnedResponses[normalizedUserMessage]) {
-                    // Found a learned response
-                    appendMessage('ai', learnedResponses[normalizedUserMessage]);
+            } catch (error) {
+                console.error("Authentication Error:", error);
+                statusText.textContent = 'Authentication Failed.';
+            }
+        }
+
+        // --- UI Rendering ---
+        function appendMessage(sender, text) {
+            const bubbleClass = sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
+            const justification = sender === 'user' ? 'justify-end' : 'justify-start';
+            const messageElement = `
+                <div class="flex ${justification} mb-4">
+                    <div class="${bubbleClass} py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
+                        <p class="text-sm">${text}</p>
+                    </div>
+                </div>`;
+            messagesList.insertAdjacentHTML('beforeend', messageElement);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // --- Core Logic ---
+        messageForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const messageText = messageInput.value.trim();
+            if (!messageText || !auth.currentUser) return;
+
+            messageInput.value = '';
+            appendMessage('user', messageText);
+
+            if (isWaitingForLesson) {
+                await teachAI(lastUserMessage, messageText);
+            } else {
+                await generateAIResponse(messageText);
+            }
+        });
+
+        async function generateAIResponse(userMessage) {
+            const normalizedUserMessage = userMessage.toLowerCase().trim();
+            const sharedResponsesRef = collection(db, `artifacts/${appId}/public/data/sharedLearnedResponses`);
+            const docRef = doc(sharedResponsesRef, normalizedUserMessage);
+
+            try {
+                const docSnap = await getDoc(docRef);
+                if (docSnap.exists()) {
+                    appendMessage('ai', docSnap.data().response);
                 } else {
-                    // Did not find a response, ask to be taught
                     isWaitingForLesson = true;
                     lastUserMessage = normalizedUserMessage;
                     const question = `I don't know how to respond to that. What should I say?`;
                     appendMessage('ai', question);
                 }
+            } catch (error) {
+                console.error("Error getting response from shared memory:", error);
+                appendMessage('ai', "Sorry, I had trouble accessing the shared memory.");
             }
-            
-            function teachAI(trigger, response) {
-                const learnedResponses = getLearnedResponses();
-                learnedResponses[trigger] = response;
-                saveLearnedResponses(learnedResponses);
-                
-                appendMessage('ai', 'Thanks! I\'ve learned that. I\'ll remember it for our future chats.');
+        }
+
+        async function teachAI(trigger, response) {
+            const sharedResponsesRef = collection(db, `artifacts/${appId}/public/data/sharedLearnedResponses`);
+            const docRef = doc(sharedResponsesRef, trigger);
+
+            try {
+                await setDoc(docRef, {
+                    trigger: trigger,
+                    response: response,
+                    learnedAt: Date.now()
+                });
+                appendMessage('ai', 'Thanks! I\'ve learned that. Everyone can now use this response.');
+            } catch (error) {
+                console.error("Error teaching AI:", error);
+                appendMessage('ai', 'Sorry, I had trouble saving that to the shared memory.');
+            } finally {
                 isWaitingForLesson = false;
                 lastUserMessage = '';
             }
-        });
+        }
+
+        // --- Initial Load ---
+        signIn();
     </script>
 </body>
 </html>
