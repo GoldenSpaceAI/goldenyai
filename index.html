@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Learning AI Chatbot (Local Memory)</title>
+    <title>Learning AI Chatbot (Persistent Memory)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -40,7 +40,7 @@
         <div class="p-4 border-b bg-blue-600 text-white rounded-t-lg flex items-center justify-between">
             <div>
                 <h1 class="text-xl font-bold">Learning AI Chatbot</h1>
-                <p id="status-text" class="text-xs opacity-80">Memory stored in this browser</p>
+                <p id="status-text" class="text-xs opacity-80">Memory is persistent, chat is not.</p>
             </div>
              <div id="status-indicator" class="w-4 h-4 rounded-full bg-green-400" title="Ready"></div>
         </div>
@@ -48,10 +48,10 @@
         <!-- Chat Messages -->
         <div id="chat-container" class="flex-1 p-6 overflow-y-auto chat-container">
             <div id="messages-list">
-                <!-- Messages will be dynamically inserted here -->
+                <!-- Welcome message is here initially -->
                 <div class="flex justify-start mb-4">
                     <div class="chat-bubble-ai py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
-                        <p class="text-sm">Hello! I'm a chatbot that learns from our conversation. My memory is saved in your browser's local storage. If I don't know something, I'll ask you to teach me.</p>
+                        <p class="text-sm">Hello! I remember what you teach me, but our chat will reset if you refresh the page. Let's start a new conversation!</p>
                     </div>
                 </div>
             </div>
@@ -80,42 +80,18 @@
             let isWaitingForLesson = false;
             let lastUserMessage = '';
             
-            // --- Data Retrieval from LocalStorage ---
+            // --- "Memory" Data Retrieval from LocalStorage ---
             const getLearnedResponses = () => {
                 const responses = localStorage.getItem('chatbotLearnedResponses');
                 return responses ? JSON.parse(responses) : {};
             };
 
-            const getConversationHistory = () => {
-                const history = localStorage.getItem('chatbotConversationHistory');
-                return history ? JSON.parse(history) : [];
-            };
-
-            // --- Data Saving to LocalStorage ---
+            // --- "Memory" Data Saving to LocalStorage ---
             const saveLearnedResponses = (responses) => {
                 localStorage.setItem('chatbotLearnedResponses', JSON.stringify(responses));
             };
 
-            const saveConversationHistory = (history) => {
-                localStorage.setItem('chatbotConversationHistory', JSON.stringify(history));
-            };
-
             // --- UI Rendering ---
-            function renderMessages(messages) {
-                messagesList.innerHTML = '';
-                 const initialMessage = `<div class="flex justify-start mb-4">
-                    <div class="chat-bubble-ai py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
-                        <p class="text-sm">Hello! I'm a chatbot that learns from our conversation. My memory is saved in your browser's local storage. If I don't know something, I'll ask you to teach me.</p>
-                    </div>
-                </div>`;
-                messagesList.insertAdjacentHTML('beforeend', initialMessage);
-
-                messages.forEach(message => {
-                    appendMessage(message.sender, message.text);
-                });
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }
-
             function appendMessage(sender, text) {
                 const bubbleClass = sender === 'user' ? 'chat-bubble-user' : 'chat-bubble-ai';
                 const justification = sender === 'user' ? 'justify-end' : 'justify-start';
@@ -136,7 +112,8 @@
                 if (!messageText) return;
 
                 messageInput.value = '';
-                saveMessage('user', messageText);
+                // Add user message to the screen
+                appendMessage('user', messageText);
 
                 if (isWaitingForLesson) {
                     teachAI(lastUserMessage, messageText);
@@ -144,13 +121,6 @@
                     generateAIResponse(messageText);
                 }
             });
-
-            function saveMessage(sender, text) {
-                const history = getConversationHistory();
-                history.push({ sender, text });
-                saveConversationHistory(history);
-                appendMessage(sender, text);
-            }
             
             function generateAIResponse(userMessage) {
                 const normalizedUserMessage = userMessage.toLowerCase().trim();
@@ -158,13 +128,13 @@
                 
                 if (learnedResponses[normalizedUserMessage]) {
                     // Found a learned response
-                    saveMessage('ai', learnedResponses[normalizedUserMessage]);
+                    appendMessage('ai', learnedResponses[normalizedUserMessage]);
                 } else {
                     // Did not find a response, ask to be taught
                     isWaitingForLesson = true;
                     lastUserMessage = normalizedUserMessage;
                     const question = `I don't know how to respond to that. What should I say?`;
-                    saveMessage('ai', question);
+                    appendMessage('ai', question);
                 }
             }
             
@@ -173,18 +143,10 @@
                 learnedResponses[trigger] = response;
                 saveLearnedResponses(learnedResponses);
                 
-                saveMessage('ai', 'Thanks! I\'ve learned that.');
+                appendMessage('ai', 'Thanks! I\'ve learned that. I\'ll remember it for our future chats.');
                 isWaitingForLesson = false;
                 lastUserMessage = '';
             }
-
-            // --- Initial Load ---
-            function initializeChat() {
-                const history = getConversationHistory();
-                renderMessages(history);
-            }
-
-            initializeChat();
         });
     </script>
 </body>
