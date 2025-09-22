@@ -51,7 +51,7 @@
                 <!-- Welcome message is here initially -->
                 <div class="flex justify-start mb-4">
                     <div class="chat-bubble-ai py-2 px-4 rounded-lg max-w-xs lg:max-w-md">
-                        <p class="text-sm">Hello! I have a shared memory. What you teach me, others will see. Our personal chat will reset if you refresh the page.</p>
+                        <p class="text-sm">Hello! I have a shared memory and already know a few things. What you teach me, others will see! Let's chat.</p>
                     </div>
                 </div>
             </div>
@@ -60,7 +60,7 @@
         <!-- Message Input -->
         <div class="p-4 border-t bg-gray-50 rounded-b-lg">
             <form id="message-form" class="flex items-center space-x-4">
-                <input type="text" id="message-input" placeholder="Type your message..." autocomplete="off" class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required>
+                <input type="text" id="message-input" placeholder="Connecting..." autocomplete="off" class="flex-1 p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" required disabled>
                 <button type="submit" class="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors duration-200" disabled>
                     Send
                 </button>
@@ -77,13 +77,13 @@
         // Firebase Imports
         import { initializeApp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, getDoc, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, doc, setDoc, getDoc, collection, writeBatch } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         const auth = getAuth(app);
-        setLogLevel('Debug');
+        // setLogLevel('Debug'); // Uncomment for detailed logs
 
         // DOM Elements
         const chatContainer = document.getElementById('chat-container');
@@ -98,26 +98,30 @@
         let isWaitingForLesson = false;
         let lastUserMessage = '';
 
-        // --- Authentication ---
-        onAuthStateChanged(auth, user => {
-            if (user) {
-                statusText.textContent = 'Connected to shared memory. Chat is not saved.';
-                statusIndicator.classList.remove('bg-yellow-400');
-                statusIndicator.classList.add('bg-green-400');
-                statusIndicator.title = 'Connected';
-                sendButton.disabled = false;
-            } else {
-                statusText.textContent = 'Disconnected. Please refresh.';
-                statusIndicator.classList.remove('bg-green-400', 'bg-yellow-400');
-                statusIndicator.classList.add('bg-red-400');
-                statusIndicator.title = 'Disconnected';
-                sendButton.disabled = true;
-            }
-        });
-        
-        async function signIn() {
+        // --- Authentication & Initialization ---
+        async function initializeAppAndAuth() {
+            onAuthStateChanged(auth, async (user) => {
+                if (user) {
+                    statusText.textContent = 'Connected to shared memory.';
+                    statusIndicator.className = 'w-4 h-4 rounded-full bg-green-400';
+                    statusIndicator.title = 'Connected';
+                    messageInput.disabled = false;
+                    messageInput.placeholder = 'Type your message...';
+                    sendButton.disabled = false;
+                    // Seed the database with initial data if it's the first time
+                    await seedInitialData();
+                } else {
+                    statusText.textContent = 'Disconnected. Please refresh.';
+                    statusIndicator.className = 'w-4 h-4 rounded-full bg-red-400';
+                    statusIndicator.title = 'Disconnected';
+                    messageInput.disabled = true;
+                    messageInput.placeholder = 'Disconnected';
+                    sendButton.disabled = true;
+                }
+            });
+
             try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                     await signInWithCustomToken(auth, __initial_auth_token);
                 } else {
                     await signInAnonymously(auth);
@@ -125,6 +129,40 @@
             } catch (error) {
                 console.error("Authentication Error:", error);
                 statusText.textContent = 'Authentication Failed.';
+                statusIndicator.className = 'w-4 h-4 rounded-full bg-red-400';
+            }
+        }
+        
+        // --- Pre-load AI with knowledge ---
+        async function seedInitialData() {
+            const sharedResponsesRef = collection(db, `artifacts/${appId}/public/data/sharedLearnedResponses`);
+            const seedFlagDoc = doc(sharedResponsesRef, '--initial-data-seeded--');
+            
+            try {
+                const flagSnapshot = await getDoc(seedFlagDoc);
+                if (!flagSnapshot.exists()) {
+                    console.log("Seeding initial data for the first time...");
+                    const batch = writeBatch(db);
+
+                    const initialData = {
+                        'hello': 'Hello there! How can I help you?',
+                        'how are you?': 'I am a bot, so I am always doing great! Thanks for asking.',
+                        'what is your purpose?': 'I am a collaborative AI. I learn from everyone\'s input to get smarter.',
+                        'who created you?': 'I was created by a user like you, with the help of an AI assistant.',
+                        'what can you do?': 'You can teach me new things! If I don\'t know something, I will ask you what I should say.'
+                    };
+                    
+                    for (const [key, value] of Object.entries(initialData)) {
+                        const docRef = doc(sharedResponsesRef, key);
+                        batch.set(docRef, { trigger: key, response: value, learnedAt: Date.now() });
+                    }
+                    
+                    batch.set(seedFlagDoc, { seeded: true, timestamp: Date.now() });
+                    await batch.commit();
+                    console.log("Initial data seeded successfully.");
+                }
+            } catch (error) {
+                console.error("Error seeding initial data:", error);
             }
         }
 
@@ -142,7 +180,7 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        // --- Core Logic ---
+        // --- Core Chat Logic ---
         messageForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             const messageText = messageInput.value.trim();
@@ -160,8 +198,7 @@
 
         async function generateAIResponse(userMessage) {
             const normalizedUserMessage = userMessage.toLowerCase().trim();
-            const sharedResponsesRef = collection(db, `artifacts/${appId}/public/data/sharedLearnedResponses`);
-            const docRef = doc(sharedResponsesRef, normalizedUserMessage);
+            const docRef = doc(db, `artifacts/${appId}/public/data/sharedLearnedResponses`, normalizedUserMessage);
 
             try {
                 const docSnap = await getDoc(docRef);
@@ -170,37 +207,30 @@
                 } else {
                     isWaitingForLesson = true;
                     lastUserMessage = normalizedUserMessage;
-                    const question = `I don't know how to respond to that. What should I say?`;
-                    appendMessage('ai', question);
+                    appendMessage('ai', `I don't know how to respond to that. What should I say?`);
                 }
             } catch (error) {
-                console.error("Error getting response from shared memory:", error);
-                appendMessage('ai', "Sorry, I had trouble accessing the shared memory.");
+                console.error("Error getting response:", error);
+                appendMessage('ai', "Sorry, I had trouble accessing my shared memory.");
             }
         }
 
         async function teachAI(trigger, response) {
-            const sharedResponsesRef = collection(db, `artifacts/${appId}/public/data/sharedLearnedResponses`);
-            const docRef = doc(sharedResponsesRef, trigger);
-
+            const docRef = doc(db, `artifacts/${appId}/public/data/sharedLearnedResponses`, trigger);
             try {
-                await setDoc(docRef, {
-                    trigger: trigger,
-                    response: response,
-                    learnedAt: Date.now()
-                });
+                await setDoc(docRef, { trigger, response, learnedAt: Date.now() });
                 appendMessage('ai', 'Thanks! I\'ve learned that. Everyone can now use this response.');
             } catch (error) {
                 console.error("Error teaching AI:", error);
-                appendMessage('ai', 'Sorry, I had trouble saving that to the shared memory.');
+                appendMessage('ai', 'Sorry, I had trouble saving that to my shared memory.');
             } finally {
                 isWaitingForLesson = false;
                 lastUserMessage = '';
             }
         }
 
-        // --- Initial Load ---
-        signIn();
+        // --- Start the App ---
+        initializeAppAndAuth();
     </script>
 </body>
 </html>
